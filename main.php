@@ -658,22 +658,40 @@ if ( ! class_exists( 'WC_WA_Shop_AI' ) ) :
 
         private function populate_template( $template, $order ) {
             $order_id = $order->get_id();
-            $order_total = wc_price( $order->get_total(), array( 'currency' => $order->get_currency() ) );
-            $customer_name = trim( $order->get_billing_first_name() . ' ' . $order->get_billing_last_name() );
+
+            $symbol = html_entity_decode(
+                get_woocommerce_currency_symbol( $order->get_currency() ),
+                ENT_QUOTES,
+                'UTF-8'
+            );
+
+            $order_total = $symbol . number_format( $order->get_total(), 2 );
+
+            $customer_name = trim(
+                $order->get_billing_first_name() . ' ' .
+                $order->get_billing_last_name()
+            );
+
             $items = array();
             foreach ( $order->get_items() as $item ) {
-                $product_name = $item->get_name();
-                $qty = $item->get_quantity();
-                $items[] = sprintf( '%s x%d', $product_name, $qty );
+                $items[] = sprintf( '%s x%d', $item->get_name(), $item->get_quantity() );
             }
+
             $order_items = implode( "\n", $items );
+
             $replacements = array(
-                '{order_id}' => $order_id,
-                '{order_total}' => $order_total,
+                '{order_id}'      => $order_id,
+                '{order_total}'   => $order_total,
                 '{customer_name}' => $customer_name,
-                '{order_items}' => $order_items,
+                '{order_items}'   => $order_items,
             );
-            return strtr( $template, $replacements );
+
+            $message = strtr( $template, $replacements );
+
+            // Fix literal \n from settings
+            $message = str_replace( '\n', "\n", $message );
+
+            return $message;
         }
 
         /**
