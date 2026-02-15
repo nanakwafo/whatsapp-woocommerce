@@ -22,8 +22,7 @@ if ( ! class_exists( 'WC_WA_Shop_AI' ) ) :
         private static $instance = null;
 
         private $defaults = array(
-            'wa_phone_id'           => '',
-            'wa_access_token'       => '',
+            
             'wa_admin_number'       => '',
             'enable_admin_notify'   => 'yes',
             'enable_customer_notify'=> 'yes',
@@ -120,6 +119,7 @@ if ( ! class_exists( 'WC_WA_Shop_AI' ) ) :
                     'license_key'     => '',
                     'license_status'  => 'inactive',
                     'license_expires' => '',
+                    'license_domain' => '',
                 ) );
             } else {
                 // normalize license option
@@ -130,6 +130,7 @@ if ( ! class_exists( 'WC_WA_Shop_AI' ) ) :
                     'license_key'     => '',
                     'license_status'  => 'inactive',
                     'license_expires' => '',
+                    'license_domain' => '',
                 ) );
                 update_option( self::OPTION_LICENSE, $license );
             }
@@ -186,8 +187,7 @@ if ( ! class_exists( 'WC_WA_Shop_AI' ) ) :
             );
 
             $fields = array(
-                'wa_phone_id' => 'WhatsApp Phone ID (from Meta / Cloud API)',
-                'wa_access_token' => 'WhatsApp Access Token',
+               
                 'wa_admin_number' => 'Admin WhatsApp Number (E.164, e.g., 233XXXXXXXXX)',
                 'enable_admin_notify' => 'Enable admin order notifications',
                 'enable_customer_notify' => 'Enable customer order notifications',
@@ -245,8 +245,7 @@ if ( ! class_exists( 'WC_WA_Shop_AI' ) ) :
             }
             $out = wp_parse_args( $out, $this->defaults );
 
-            $out['wa_phone_id'] = isset( $input['wa_phone_id'] ) ? sanitize_text_field( $input['wa_phone_id'] ) : $out['wa_phone_id'];
-            $out['wa_access_token'] = isset( $input['wa_access_token'] ) ? sanitize_text_field( $input['wa_access_token'] ) : $out['wa_access_token'];
+           
             $out['wa_admin_number'] = isset( $input['wa_admin_number'] ) ? sanitize_text_field( $input['wa_admin_number'] ) : $out['wa_admin_number'];
 
             $out['enable_admin_notify'] = ( isset( $input['enable_admin_notify'] ) && $input['enable_admin_notify'] === 'yes' ) ? 'yes' : 'no';
@@ -285,8 +284,7 @@ if ( ! class_exists( 'WC_WA_Shop_AI' ) ) :
             $opts = wp_parse_args( is_array( $opts ) ? $opts : array(), $this->defaults );
 
             switch ( $key ) {
-                case 'wa_phone_id':
-                case 'wa_access_token':
+             
                 case 'wa_admin_number':
                 case 'product_button_text':
                     printf(
@@ -698,49 +696,47 @@ if ( ! class_exists( 'WC_WA_Shop_AI' ) ) :
          * Send message via WhatsApp Cloud API (gated by license).
          */
         private function send_whatsapp_cloud_text_message( $to_digits, $message_body ) {
-            $opts = get_option( self::OPTION_NAME );
-            $opts = wp_parse_args( is_array( $opts ) ? $opts : array(), $this->defaults );
-
-            $phone_id = isset( $opts['wa_phone_id'] ) ? $opts['wa_phone_id'] : '';
-            $access_token = isset( $opts['wa_access_token'] ) ? $opts['wa_access_token'] : '';
-
-            if ( empty( $phone_id ) || empty( $access_token ) ) {
-                return false;
-            }
-
+        
             $payload = array(
-                'messaging_product' => 'whatsapp',
-                'to' => $to_digits,
-                'type' => 'text',
-                'text' => array( 'body' => $message_body ),
+                'phone_number'    => $to_digits,
+                'message' => $message_body,
             );
           
-
-            $url = "https://graph.facebook.com/v24.0/" . rawurlencode( $phone_id ) . "/messages";
           
+            // TODO: Replace with your real license server endpoint (use HTTPS)
+            $endpoint = 'https://api.waorders.com/api/message/send';
+
             $args = array(
-                'headers' => array(
-                    'Authorization' => 'Bearer ' . $access_token,
-                    'Content-Type' => 'application/json',
-                ),
                 'body' => wp_json_encode( $payload ),
-                'timeout' => 15,    
+                'headers' => array(
+                    'Content-Type' => 'application/json',
+                    'Accept' => 'application/json',
+                    // 'Authorization' => 'Bearer your_server_secret',
+                ),
+                'timeout' => 20,
             );
 
-            $response = wp_remote_post( $url, $args );
-   
+            $response = wp_remote_post( $endpoint, $args );
+           
+
             if ( is_wp_error( $response ) ) {
                 return false;
             }
 
             $code = wp_remote_retrieve_response_code( $response );
-            if ( intval( $code ) >= 200 && intval( $code ) < 300 ) {
-                set_transient( 'wa_last_chat_' . $to_digits, time(), DAY_IN_SECONDS );
-                return true;
+            if ( intval( $code ) < 200 || intval( $code ) > 299 ) {
+                return false;
             }
-           
 
-            return false;
+            $body = wp_remote_retrieve_body( $response );
+            $data = json_decode( $body, true );
+
+            if ( ! is_array( $data ) ) {
+                return false;
+            }
+
+            return $data;
+
         }
         private function send_whatsapp_message_smart( $to, $text ) {
 
@@ -755,42 +751,45 @@ if ( ! class_exists( 'WC_WA_Shop_AI' ) ) :
         }
         private function send_whatsapp_session_reopen_template_with_text( $to, $text ) {
 
-            $opts = get_option( self::OPTION_NAME );
-            $opts = wp_parse_args( is_array( $opts ) ? $opts : array(), $this->defaults );
+          $payload = array(
+                'phone_number'    => $to,
+                'message' => $text,
+            );
+          
+          
+            // TODO: Replace with your real license server endpoint (use HTTPS)
+            $endpoint = 'https://api.waorders.com/api/message/send-template';
 
-            $payload = array(
-                'messaging_product' => 'whatsapp',
-                'to' => $to,
-                'type' => 'template',
-                'template' => array(
-                    'name' => 'order_update_notification',
-                    'language' => array(
-                        'code' => 'en',
-                    ),
-                    'components' => array(
-                        array(
-                            'type' => 'body',
-                            'parameters' => array(
-                                array(
-                                    'type' => 'text',
-                                    'text' => $text
-                                )
-                            ),
-                        ),
-                    ),
+            $args = array(
+                'body' => wp_json_encode( $payload ),
+                'headers' => array(
+                    'Content-Type' => 'application/json',
+                    'Accept' => 'application/json',
+                    // 'Authorization' => 'Bearer your_server_secret',
                 ),
+                'timeout' => 20,
             );
 
-            $url = "https://graph.facebook.com/v24.0/" . rawurlencode( $opts['wa_phone_id'] ) . "/messages";
+            $response = wp_remote_post( $endpoint, $args );
+           
 
-            return wp_remote_post( $url, array(
-                'headers' => array(
-                    'Authorization' => 'Bearer ' . $opts['wa_access_token'],
-                    'Content-Type' => 'application/json',
-                ),
-                'body' => wp_json_encode( $payload ),
-                'timeout' => 15,
-            ) );
+            if ( is_wp_error( $response ) ) {
+                return false;
+            }
+
+            $code = wp_remote_retrieve_response_code( $response );
+            if ( intval( $code ) < 200 || intval( $code ) > 299 ) {
+                return false;
+            }
+
+            $body = wp_remote_retrieve_body( $response );
+            $data = json_decode( $body, true );
+
+            if ( ! is_array( $data ) ) {
+                return false;
+            }
+
+            return $data; 
         }
 
 
@@ -813,6 +812,7 @@ if ( ! class_exists( 'WC_WA_Shop_AI' ) ) :
                 'license_key'     => '',
                 'license_status'  => 'inactive',
                 'license_expires' => '',
+                'license_domain'  => home_url(),
             ) );
             return $license;
         }
@@ -844,6 +844,10 @@ if ( ! class_exists( 'WC_WA_Shop_AI' ) ) :
             if ( isset( $_POST['wc_wa_license_nonce'] ) && wp_verify_nonce( wp_unslash( $_POST['wc_wa_license_nonce'] ), 'wc_wa_license_activate' ) ) {
                 if ( isset( $_POST['license_key'] ) ) {
                     $key = sanitize_text_field( wp_unslash( $_POST['license_key'] ) );
+                    $domain = isset($_POST['license_domain'])
+                        ? esc_url_raw( wp_unslash($_POST['license_domain']) )
+                        : home_url();
+
                     $check = $this->check_license_with_server( $key );
                     if ( is_array( $check ) && isset( $check['valid'] ) && $check['valid'] === true ) {
                         // success -> save into separate license option
@@ -851,6 +855,7 @@ if ( ! class_exists( 'WC_WA_Shop_AI' ) ) :
                             'license_key'     => $key,
                             'license_status'  => 'active',
                             'license_expires' => isset( $check['expires_at'] ) ? sanitize_text_field( $check['expires_at'] ) : '',
+                            'license_domain'  => $domain,
                         ) );
                         echo '<div class="notice notice-success is-dismissible"><p>License activated successfully.</p></div>';
                         // refresh local vars
@@ -887,6 +892,17 @@ if ( ! class_exists( 'WC_WA_Shop_AI' ) ) :
                         <tr>
                             <th scope="row"><label for="license_key">License Key</label></th>
                             <td><input name="license_key" id="license_key" type="text" value="<?php echo esc_attr( $license_key ); ?>" class="regular-text" /></td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="license_domain">Domain</label></th>
+                            <td>
+                                <input name="license_domain"
+                                    id="license_domain"
+                                    type="text"
+                                    value="<?php echo esc_attr( $license['license_domain'] ?? home_url() ); ?>"
+                                    class="regular-text" />
+                                <p class="description">Enter the domain this license is activated for.</p>
+                            </td>
                         </tr>
                         <tr>
                             <th scope="row">Status</th>
@@ -943,30 +959,35 @@ if ( ! class_exists( 'WC_WA_Shop_AI' ) ) :
          * @return bool|array
          */
         private function check_license_with_server( $license_key ) {
+            
             $license_key = trim( $license_key );
             if ( empty( $license_key ) ) {
                 return false;
             }
 
+            $license = $this->get_license_data();
+
             $payload = array(
-                'license_key' => $license_key,
-                'domain' => home_url(),
+                'key'    => $license_key,
+                'domain' => $license['license_domain'],
             );
-            
+          
+          
             // TODO: Replace with your real license server endpoint (use HTTPS)
-            $endpoint = 'http://localhost:8000/api/check-license';
+            $endpoint = 'https://api.waorders.com/api/check-license';
 
             $args = array(
                 'body' => wp_json_encode( $payload ),
                 'headers' => array(
                     'Content-Type' => 'application/json',
+                    'Accept' => 'application/json',
                     // 'Authorization' => 'Bearer your_server_secret',
                 ),
                 'timeout' => 20,
             );
 
             $response = wp_remote_post( $endpoint, $args );
-            
+           
 
             if ( is_wp_error( $response ) ) {
                 return false;
